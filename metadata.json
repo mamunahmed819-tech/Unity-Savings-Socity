@@ -1,0 +1,7 @@
+{
+  "name": "Unity Savings Society",
+  "description": "Professional Community Savings and Credit Management System.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
