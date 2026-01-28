@@ -7,6 +7,9 @@
     <title>Unity Savings Society - Enterprise</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
+      // Polyfill for process.env to prevent ReferenceErrors in the browser
+      window.process = { env: { API_KEY: "" } };
+      
       tailwind.config = {
         darkMode: 'class',
         theme: {
@@ -68,12 +71,6 @@
         .animate-fade-in {
             animation: fadeIn 0.5s ease-out forwards;
         }
-        @media print {
-            .print-barcode {
-                font-family: 'Libre Barcode 128', cursive !important;
-                font-size: 60px !important;
-            }
-        }
     </style>
 <script type="importmap">
 {
@@ -83,6 +80,7 @@
     "react": "https://esm.sh/react@19.0.0",
     "react-dom": "https://esm.sh/react-dom@19.0.0",
     "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime",
     "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
     "react/": "https://esm.sh/react@^19.2.4/"
   }

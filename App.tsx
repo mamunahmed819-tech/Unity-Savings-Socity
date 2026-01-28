@@ -1,14 +1,15 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
-import { Transaction, TransactionType, FinancialSummary, Category } from './types';
-import SummaryCards from './components/SummaryCards';
-import ChartsSection from './components/ChartsSection';
-import TransactionList from './components/TransactionList';
-import TransactionForm from './components/TransactionForm';
-import DeleteConfirmationModal from './components/DeleteConfirmationModal';
-import InvoiceModal from './components/InvoiceModal';
-import Auth from './components/Auth';
-import { Icons } from './constants';
-import { getFinancialAdvice } from './services/geminiService';
+import { Transaction, TransactionType, FinancialSummary, Category } from './types.ts';
+import SummaryCards from './components/SummaryCards.tsx';
+import ChartsSection from './components/ChartsSection.tsx';
+import TransactionList from './components/TransactionList.tsx';
+import TransactionForm from './components/TransactionForm.tsx';
+import DeleteConfirmationModal from './components/DeleteConfirmationModal.tsx';
+import InvoiceModal from './components/InvoiceModal.tsx';
+import Auth from './components/Auth.tsx';
+import { Icons } from './constants.tsx';
+import { getFinancialAdvice } from './services/geminiService.ts';
 
 const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
