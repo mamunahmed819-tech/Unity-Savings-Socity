@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Icons } from '../constants';
 
@@ -14,6 +15,7 @@ type AuthState = 'login' | 'register' | 'reset';
 const Auth: React.FC<AuthProps> = ({ onLogin, lang, onLangToggle, theme, onThemeToggle }) => {
   const [authState, setAuthState] = useState<AuthState>('login');
   const [userName, setUserName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -29,6 +31,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang, onLangToggle, theme, onTheme
     registerHeader: lang === 'bn' ? 'সোসাইটি সেটআপ করুন' : 'Setup Your Society',
     resetHeader: lang === 'bn' ? 'নতুন পিন সেট করুন' : 'Set New Pin',
     userNameLabel: lang === 'bn' ? 'ইউজারনেম' : 'USERNAME',
+    emailLabel: lang === 'bn' ? 'ইমেইল এড্রেস' : 'EMAIL ADDRESS',
     passwordLabel: lang === 'bn' ? 'সিকিউরিটি পিন' : 'SECURITY PIN',
     confirmLabel: lang === 'bn' ? 'পিন নিশ্চিত করুন' : 'CONFIRM PIN',
     loginBtn: lang === 'bn' ? 'সোসাইটি খুলুন' : 'Open Dashboard',
@@ -77,8 +80,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang, onLangToggle, theme, onTheme
     setSuccess('');
 
     if (authState === 'register') {
-      if (!userName || !password) return setError(t.errorEmpty);
-      localStorage.setItem('medstore_creds', JSON.stringify({ userName, password }));
+      if (!userName || !password || !email) return setError(t.errorEmpty);
+      localStorage.setItem('medstore_creds', JSON.stringify({ userName, password, email }));
       sessionStorage.setItem('medstore_session', userName);
       onLogin(userName);
     } 
@@ -149,6 +152,20 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang, onLangToggle, theme, onTheme
                 value={userName} onChange={(e) => setUserName(e.target.value)}
               />
             </div>
+
+            {authState === 'register' && (
+              <div className="space-y-1.5 group animate-in slide-in-from-top-4 duration-500">
+                <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] ml-1 group-focus-within:text-brand-500 transition-colors">
+                  {t.emailLabel}
+                </label>
+                <input
+                  type="email"
+                  placeholder="e.g. mamun@example.com"
+                  className="w-full bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800 rounded-2xl px-6 py-4.5 text-slate-900 dark:text-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 transition-all font-bold text-sm"
+                  value={email} onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+            )}
 
             <div className="space-y-1.5 group">
               <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] ml-1 group-focus-within:text-brand-500 transition-colors">

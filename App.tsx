@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Transaction, TransactionType, FinancialSummary, Category } from './types.ts';
 import SummaryCards from './components/SummaryCards.tsx';
@@ -10,6 +9,7 @@ import InvoiceModal from './components/InvoiceModal.tsx';
 import Auth from './components/Auth.tsx';
 import { Icons } from './constants.tsx';
 import { getFinancialAdvice } from './services/geminiService.ts';
+import { supabase } from './services/supabaseClient.ts';
 
 const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -20,6 +20,7 @@ const App: React.FC = () => {
   const [filterMonth, setFilterMonth] = useState('all');
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(true);
   
   const [lang, setLang] = useState<'bn' | 'en'>(() => {
     return (localStorage.getItem('medstore_lang') as 'bn' | 'en') || 'en';
@@ -43,6 +44,7 @@ const App: React.FC = () => {
     }
   }, [theme]);
 
+  // Load session and initial data from Supabase
   useEffect(() => {
     const sessionUserName = sessionStorage.getItem('medstore_session');
     if (sessionUserName) {
@@ -52,19 +54,34 @@ const App: React.FC = () => {
       }
     }
 
-    const saved = localStorage.getItem('medstore_transactions');
-    if (saved) {
-      try {
-        setTransactions(JSON.parse(saved));
-      } catch (e) {
-        console.error("Data load error:", e);
-      }
-    }
-  }, []);
+    const fetchTransactions = async () => {
+      setIsDataLoading(true);
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
 
-  useEffect(() => {
-    localStorage.setItem('medstore_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+      if (error) {
+        console.error("Error fetching transactions:", error);
+      } else if (data) {
+        // Map snake_case from DB to camelCase for App
+        const mappedData: Transaction[] = data.map(t => ({
+          id: t.id,
+          date: t.date,
+          type: t.type as TransactionType,
+          items: t.items,
+          totalAmount: t.total_amount,
+          paymentMethod: t.payment_method,
+          receivedFrom: t.received_from,
+          mobileNumber: t.mobile_number
+        }));
+        setTransactions(mappedData);
+      }
+      setIsDataLoading(false);
+    };
+
+    fetchTransactions();
+  }, []);
 
   const summary: FinancialSummary = useMemo(() => {
     const now = new Date();
@@ -87,15 +104,51 @@ const App: React.FC = () => {
     return { currentBalance, totalIncome, totalExpense, totalItemsSold };
   }, [transactions]);
 
-  const handleAddTransaction = (newTransaction: Transaction) => {
+  const handleAddTransaction = async (newTransaction: Transaction) => {
+    // Optimistic UI update
     setTransactions(prev => [newTransaction, ...prev]);
     setInvoiceTransaction(newTransaction);
+
+    // Save to Supabase
+    const { error } = await supabase
+      .from('transactions')
+      .insert([{
+        id: newTransaction.id,
+        date: newTransaction.date,
+        type: newTransaction.type,
+        items: newTransaction.items,
+        total_amount: newTransaction.totalAmount,
+        payment_method: newTransaction.paymentMethod,
+        received_from: newTransaction.receivedFrom,
+        mobile_number: newTransaction.mobileNumber
+      }]);
+
+    if (error) {
+      console.error("Error adding transaction:", error);
+      // Revert UI on error
+      setTransactions(prev => prev.filter(t => t.id !== newTransaction.id));
+      alert(lang === 'bn' ? "তথ্য সেভ করতে সমস্যা হয়েছে।" : "Error saving to cloud.");
+    }
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (transactionToDelete) {
-      setTransactions(prev => prev.filter(t => t.id !== transactionToDelete));
+      const id = transactionToDelete;
+      // Optimistic UI update
+      setTransactions(prev => prev.filter(t => t.id !== id));
       setTransactionToDelete(null);
+
+      // Delete from Supabase
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error("Error deleting transaction:", error);
+        alert(lang === 'bn' ? "মুছে ফেলতে সমস্যা হয়েছে।" : "Error deleting from cloud.");
+        // We might want to re-fetch here if critical
+      }
     }
   };
 
@@ -118,7 +171,8 @@ const App: React.FC = () => {
     support: lang === 'bn' ? 'সাপোর্ট:' : 'Support:',
     phone: '01744810248',
     email: 'society2k26@gmail.com',
-    suffix: lang === 'bn' ? ' এর সোসাইটি' : "'s Society"
+    suffix: lang === 'bn' ? ' এর সোসাইটি' : "'s Society",
+    loading: lang === 'bn' ? 'লোড হচ্ছে...' : 'Loading Data...'
   };
 
   if (!loggedUser) {
@@ -164,56 +218,63 @@ const App: React.FC = () => {
 
       <main className="max-w-6xl mx-auto px-6 py-10 w-full flex-grow print:p-0 print:max-w-none">
         <div className="print:hidden">
-          <SummaryCards summary={summary} lang={lang} />
-          {aiInsight && (
-            <div className="bg-brand-50/50 dark:bg-brand-500/5 border border-brand-100 dark:border-brand-500/20 rounded-3xl p-8 mb-10 relative animate-fade-in">
-              <button onClick={() => setAiInsight(null)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
-                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-              <div className="flex gap-6">
-                <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-900 border border-brand-100 dark:border-brand-500/20 flex items-center justify-center text-brand-600 shrink-0 shadow-sm">
-                  <Icons.Sparkles />
-                </div>
-                <div>
-                  <span className="text-[10px] font-black text-brand-700 dark:text-brand-400 uppercase tracking-[0.2em] block mb-2">Society Advisor AI</span>
-                  <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed max-w-2xl whitespace-pre-line font-medium">{aiInsight}</p>
-                </div>
-              </div>
+          {isDataLoading ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <div className="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+              <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">{t.loading}</p>
             </div>
+          ) : (
+            <>
+              <SummaryCards summary={summary} lang={lang} />
+              {aiInsight && (
+                <div className="bg-brand-50/50 dark:bg-brand-500/5 border border-brand-100 dark:border-brand-500/20 rounded-3xl p-8 mb-10 relative animate-fade-in">
+                  <button onClick={() => setAiInsight(null)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                  <div className="flex gap-6">
+                    <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-900 border border-brand-100 dark:border-brand-500/20 flex items-center justify-center text-brand-600 shrink-0 shadow-sm">
+                      <Icons.Sparkles />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-brand-700 dark:text-brand-400 uppercase tracking-[0.2em] block mb-2">Society Advisor AI</span>
+                      <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed max-w-2xl whitespace-pre-line font-medium">{aiInsight}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <ChartsSection transactions={transactions} lang={lang} />
+              <div className="mt-8">
+                <TransactionList 
+                  transactions={transactions}
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  filterMonth={filterMonth}
+                  onMonthChange={setFilterMonth}
+                  onDelete={setTransactionToDelete}
+                  onShowInvoice={setInvoiceTransaction}
+                  lang={lang}
+                />
+              </div>
+            </>
           )}
-          <ChartsSection transactions={transactions} lang={lang} />
-          <div className="mt-8">
-            <TransactionList 
-              transactions={transactions}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              filterMonth={filterMonth}
-              onMonthChange={setFilterMonth}
-              onDelete={setTransactionToDelete}
-              onShowInvoice={setInvoiceTransaction}
-              lang={lang}
-            />
-          </div>
         </div>
       </main>
 
       <footer className="max-w-6xl mx-auto px-6 py-12 w-full border-t border-slate-100 dark:border-slate-900 mt-auto print:hidden">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex flex-col items-center md:items-start gap-1">
-            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em]">© {new Date().getFullYear()} Unity Savings Society – Enterprise Edition</p>
+            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em]">© {new Date().getFullYear()} Unity Savings Society – Cloud Enterprise</p>
             <p className="text-brand-600 dark:text-brand-400 text-[10px] font-black uppercase tracking-[0.4em]">Developed by Mamun</p>
           </div>
           <div className="flex flex-col sm:flex-row items-center gap-3 bg-slate-50 dark:bg-slate-900 px-6 py-4 rounded-3xl border border-slate-100 dark:border-slate-800">
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest sm:mr-2">{t.support}</span>
             <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-6">
               <a href={`tel:${t.phone}`} className="flex items-center gap-2 text-xs font-black text-slate-900 dark:text-brand-400 hover:underline">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
-                {t.phone}
+                <Icons.Plus className="w-3.5 h-3.5 rotate-45" /> {t.phone}
               </a>
               <div className="hidden sm:block w-px h-3 bg-slate-200 dark:bg-slate-700"></div>
               <a href={`mailto:${t.email}`} className="flex items-center gap-2 text-xs font-black text-slate-900 dark:text-brand-400 hover:underline">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
-                {t.email}
+                <Icons.Invoice className="w-3.5 h-3.5" /> {t.email}
               </a>
             </div>
           </div>
