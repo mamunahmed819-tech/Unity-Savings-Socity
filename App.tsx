@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Transaction, TransactionType, FinancialSummary, Category } from './types.ts';
 import SummaryCards from './components/SummaryCards.tsx';
@@ -47,15 +48,25 @@ const App: React.FC = () => {
   // Load session and initial data from Supabase
   useEffect(() => {
     const sessionUserName = sessionStorage.getItem('medstore_session');
-    if (sessionUserName) {
-      const savedCreds = JSON.parse(localStorage.getItem('medstore_creds') || '{}');
-      if (savedCreds.userName === sessionUserName) {
-        setLoggedUser(savedCreds.userName);
-      }
-    }
-
-    const fetchTransactions = async () => {
+    
+    const verifyAndFetch = async () => {
       setIsDataLoading(true);
+      
+      if (sessionUserName) {
+        // Verify user exists in cloud
+        const { data: userData } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('username', sessionUserName)
+          .single();
+          
+        if (userData) {
+          setLoggedUser(userData.username);
+        } else {
+          sessionStorage.removeItem('medstore_session');
+        }
+      }
+
       const { data, error } = await supabase
         .from('transactions')
         .select('*')
@@ -64,7 +75,6 @@ const App: React.FC = () => {
       if (error) {
         console.error("Error fetching transactions:", error);
       } else if (data) {
-        // Map snake_case from DB to camelCase for App
         const mappedData: Transaction[] = data.map(t => ({
           id: t.id,
           date: t.date,
@@ -80,7 +90,7 @@ const App: React.FC = () => {
       setIsDataLoading(false);
     };
 
-    fetchTransactions();
+    verifyAndFetch();
   }, []);
 
   const summary: FinancialSummary = useMemo(() => {
@@ -105,11 +115,9 @@ const App: React.FC = () => {
   }, [transactions]);
 
   const handleAddTransaction = async (newTransaction: Transaction) => {
-    // Optimistic UI update
     setTransactions(prev => [newTransaction, ...prev]);
     setInvoiceTransaction(newTransaction);
 
-    // Save to Supabase
     const { error } = await supabase
       .from('transactions')
       .insert([{
@@ -125,7 +133,6 @@ const App: React.FC = () => {
 
     if (error) {
       console.error("Error adding transaction:", error);
-      // Revert UI on error
       setTransactions(prev => prev.filter(t => t.id !== newTransaction.id));
       alert(lang === 'bn' ? "তথ্য সেভ করতে সমস্যা হয়েছে।" : "Error saving to cloud.");
     }
@@ -134,11 +141,9 @@ const App: React.FC = () => {
   const handleConfirmDelete = async () => {
     if (transactionToDelete) {
       const id = transactionToDelete;
-      // Optimistic UI update
       setTransactions(prev => prev.filter(t => t.id !== id));
       setTransactionToDelete(null);
 
-      // Delete from Supabase
       const { error } = await supabase
         .from('transactions')
         .delete()
@@ -147,7 +152,6 @@ const App: React.FC = () => {
       if (error) {
         console.error("Error deleting transaction:", error);
         alert(lang === 'bn' ? "মুছে ফেলতে সমস্যা হয়েছে।" : "Error deleting from cloud.");
-        // We might want to re-fetch here if critical
       }
     }
   };
@@ -175,7 +179,7 @@ const App: React.FC = () => {
     loading: lang === 'bn' ? 'লোড হচ্ছে...' : 'Loading Data...'
   };
 
-  if (!loggedUser) {
+  if (!loggedUser && !isDataLoading) {
     return <Auth onLogin={setLoggedUser} lang={lang} onLangToggle={toggleLang} theme={theme} onThemeToggle={toggleTheme} />;
   }
 

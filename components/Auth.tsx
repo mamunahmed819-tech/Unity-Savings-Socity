@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Icons } from '../constants';
+import { supabase } from '../services/supabaseClient';
 
 interface AuthProps {
   onLogin: (userName: string) => void;
@@ -21,6 +22,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang, onLangToggle, theme, onTheme
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   
   const userRef = useRef<HTMLInputElement>(null);
 
@@ -44,15 +46,21 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang, onLangToggle, theme, onTheme
     errorMismatch: lang === 'bn' ? 'পিন দুটি মেলেনি' : 'Pins do not match',
     errorInvalid: lang === 'bn' ? 'ভুল নাম অথবা পিন' : 'Invalid name or pin',
     errorNoUser: lang === 'bn' ? 'এই নামে কাউকে পাওয়া যায়নি' : 'User not found',
+    errorExists: lang === 'bn' ? 'এই ইউজারনেমটি আগেই নেয়া হয়েছে' : 'Username already exists',
     successReset: lang === 'bn' ? 'পিন সফলভাবে বদলেছে!' : 'Pin updated successfully!',
     dataSafe: lang === 'bn' ? 'আপনার তথ্য নিরাপদ' : 'Your data is encrypted',
     backupData: lang === 'bn' ? 'ব্যাকআপ নিন' : 'Download Backup',
-    resetNote: lang === 'bn' ? 'নোট: ডাটা ডিলিট হবে না' : 'Note: Your data is safe.'
+    resetNote: lang === 'bn' ? 'নোট: ডাটা ডিলিট হবে না' : 'Note: Your data is safe.',
+    loading: lang === 'bn' ? 'প্রসেস হচ্ছে...' : 'Processing...'
   };
 
   useEffect(() => {
-    const hasCreds = localStorage.getItem('medstore_creds');
-    if (!hasCreds) setAuthState('register');
+    // Check if any user exists in Supabase to decide initial state
+    const checkUsers = async () => {
+      const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+      if (count === 0) setAuthState('register');
+    };
+    checkUsers();
     setTimeout(() => userRef.current?.focus(), 500);
   }, []);
 
@@ -74,37 +82,78 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang, onLangToggle, theme, onTheme
     setSuccess(lang === 'bn' ? 'ব্যাকআপ সম্পন্ন!' : 'Backup Complete!');
   };
 
-  const handleAction = (e: React.FormEvent) => {
+  const handleAction = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
+    setIsLoading(true);
 
-    if (authState === 'register') {
-      if (!userName || !password || !email) return setError(t.errorEmpty);
-      localStorage.setItem('medstore_creds', JSON.stringify({ userName, password, email }));
-      sessionStorage.setItem('medstore_session', userName);
-      onLogin(userName);
-    } 
-    else if (authState === 'login') {
-      if (!userName || !password) return setError(t.errorEmpty);
-      const saved = JSON.parse(localStorage.getItem('medstore_creds') || '{}');
-      if (saved.userName?.toLowerCase() === userName.toLowerCase() && saved.password === password) {
-        sessionStorage.setItem('medstore_session', saved.userName);
-        onLogin(saved.userName);
-      } else setError(t.errorInvalid);
-    }
-    else if (authState === 'reset') {
-      if (!userName || !password || !confirmPassword) return setError(t.errorEmpty);
-      if (password !== confirmPassword) return setError(t.errorMismatch);
-      const saved = JSON.parse(localStorage.getItem('medstore_creds') || '{}');
-      if (saved.userName?.toLowerCase() === userName.toLowerCase()) {
-        localStorage.setItem('medstore_creds', JSON.stringify({ ...saved, password }));
+    try {
+      if (authState === 'register') {
+        if (!userName || !password || !email) {
+          setIsLoading(false);
+          return setError(t.errorEmpty);
+        }
+
+        // Register in Supabase
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert([{ username: userName, email, password }]);
+
+        if (insertError) {
+          if (insertError.code === '23505') throw new Error(t.errorExists);
+          throw insertError;
+        }
+
+        sessionStorage.setItem('medstore_session', userName);
+        onLogin(userName);
+      } 
+      else if (authState === 'login') {
+        if (!userName || !password) {
+          setIsLoading(false);
+          return setError(t.errorEmpty);
+        }
+
+        // Login from Supabase
+        const { data, error: loginError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('username', userName)
+          .eq('password', password)
+          .single();
+
+        if (loginError || !data) throw new Error(t.errorInvalid);
+
+        sessionStorage.setItem('medstore_session', data.username);
+        onLogin(data.username);
+      }
+      else if (authState === 'reset') {
+        if (!userName || !password || !confirmPassword) {
+          setIsLoading(false);
+          return setError(t.errorEmpty);
+        }
+        if (password !== confirmPassword) {
+          setIsLoading(false);
+          return setError(t.errorMismatch);
+        }
+
+        const { error: resetError } = await supabase
+          .from('profiles')
+          .update({ password })
+          .eq('username', userName);
+
+        if (resetError) throw new Error(t.errorNoUser);
+
         setSuccess(t.successReset);
         setTimeout(() => {
           setAuthState('login');
           setSuccess('');
         }, 1500);
-      } else setError(t.errorNoUser);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Authentication error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -207,8 +256,12 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang, onLangToggle, theme, onTheme
             {error && <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-100 py-3 rounded-xl text-rose-500 text-[10px] font-black text-center uppercase tracking-widest animate-shake">{error}</div>}
             {success && <div className="bg-teal-50 dark:bg-teal-500/10 border border-teal-100 py-3 rounded-xl text-teal-600 text-[10px] font-black text-center uppercase tracking-widest">{success}</div>}
 
-            <button type="submit" className="w-full bg-slate-950 dark:bg-brand-600 hover:bg-slate-800 dark:hover:bg-brand-500 text-white font-black py-5 rounded-2xl shadow-2xl transition-all active:scale-[0.97] text-sm uppercase tracking-[0.2em]">
-              {authState === 'login' ? t.loginBtn : authState === 'register' ? t.registerBtn : t.resetBtn}
+            <button 
+              disabled={isLoading}
+              type="submit" 
+              className="w-full bg-slate-950 dark:bg-brand-600 hover:bg-slate-800 dark:hover:bg-brand-500 text-white font-black py-5 rounded-2xl shadow-2xl transition-all active:scale-[0.97] text-sm uppercase tracking-[0.2em] disabled:opacity-50"
+            >
+              {isLoading ? t.loading : (authState === 'login' ? t.loginBtn : authState === 'register' ? t.registerBtn : t.resetBtn)}
             </button>
           </form>
 
